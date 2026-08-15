@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package inference.v1;
+
+option go_package = "github.com/jiholee5217/distributed-llm-inference-platform/gen/inference/v1;inferencev1";
+
+// InferenceWorker is implemented by each Python worker. The controller chooses
+// a worker before invoking this service.
+service InferenceWorker {
+  rpc Generate(GenerateRequest) returns (GenerateResponse);
+}
+
+// WorkerRegistry is implemented by the Go controller. Registration describes
+// durable identity/capability state; heartbeats carry ephemeral liveness/load.
+service WorkerRegistry {
+  rpc Register(RegisterWorkerRequest) returns (RegisterWorkerResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+message GenerateRequest {
+  string request_id = 1;
+  uint32 attempt = 2;
+  string model = 3;
+  string model_version = 4;
+  string prompt = 5;
+  uint32 max_new_tokens = 6;
+}
+
+message GenerateResponse {
+  string request_id = 1;
+  string worker_id = 2;
+  string model_version = 3;
+  string text = 4;
+  uint32 input_tokens = 5;
+  uint32 output_tokens = 6;
+}
+
+message RegisterWorkerRequest {
+  string worker_id = 1;
+  uint64 generation = 2;
+  string endpoint = 3;
+  repeated ModelCapability models = 4;
+  uint32 max_concurrency = 5;
+}
+
+message RegisterWorkerResponse {
+  string lease_id = 1;
+  uint32 heartbeat_interval_ms = 2;
+  uint32 lease_timeout_ms = 3;
+}
+
+message HeartbeatRequest {
+  string worker_id = 1;
+  uint64 generation = 2;
+  string lease_id = 3;
+  uint32 active_requests = 4;
+  uint32 queue_depth = 5;
+  bool ready = 6;
+}
+
+message HeartbeatResponse {
+  bool accepted = 1;
+  bool drain = 2;
+}
+
+message ModelCapability {
+  string name = 1;
+  string version = 2;
+}

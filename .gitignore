@@ -1,0 +1,22 @@
+# Go
+bin/
+coverage.out
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Generated protobuf code
+gen/
+
+# Runtime state and models
+data/
+models/
+
+# Local configuration
+.env
+.DS_Store
+.idea/
+.vscode/
