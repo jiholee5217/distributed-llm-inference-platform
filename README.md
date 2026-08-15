@@ -13,6 +13,27 @@ to coordinate a distributed ML serving system.
 > **Status:** Phase 0 — architecture and API contracts. No throughput, latency,
 > fault-tolerance, or production-readiness claims are made yet.
 
+## 60-second project tour
+
+| Question | Answer |
+| --- | --- |
+| What problem does it solve? | Routes LLM inference requests across workers that can join, overload, drain, deploy new versions, or fail. |
+| What makes it a distributed-systems project? | Scheduling decisions combine strongly consistent desired state with rapidly changing worker liveness and load. |
+| Why use the Raft KV store? | It gives controllers one durable ordering for registrations, generations, deployment intent, and lifecycle transitions. |
+| What stays out of Raft? | High-frequency heartbeats and load samples, because consensus would make them expensive and they become stale quickly. |
+| Where does batching happen? | Inside each Python worker, which owns its model runtime and request-compatibility rules. |
+| How will it be evaluated? | Failure-injection tests, reproducible load tests, Prometheus metrics, and recorded latency/throughput tradeoffs. |
+
+### Current evidence
+
+| Area | Status | Evidence |
+| --- | --- | --- |
+| System boundaries | Documented | [Architecture](docs/architecture.md) |
+| Durable versus ephemeral state | Decision recorded | [ADR 0001](docs/adr/0001-control-plane-state.md) |
+| Service API | Initial contract | [Protobuf](api/inference/v1/inference.proto) |
+| Implementation | Not started | [Milestone roadmap](docs/roadmap.md) |
+| Benchmarks and failure tests | Not started | Claims will be added only with reproducible results |
+
 ## Why this project exists
 
 The engineering question is not merely "can a model return text?" It is:
@@ -22,7 +43,7 @@ The engineering question is not merely "can a model return text?" It is:
 
 The project is designed to make those decisions visible, testable, and measurable.
 
-## Planned architecture
+## System at a glance
 
 ```mermaid
 flowchart LR
@@ -60,6 +81,9 @@ KV store; high-frequency liveness and load samples stay in controller memory.
 This avoids turning the single Raft leader into a heartbeat bottleneck while still
 making important control decisions recoverable.
 
+For request, failure-recovery, state-ownership, and rollout views, see the
+[diagram gallery](docs/diagrams.md).
+
 ## Build sequence
 
 1. **Vertical slice:** one Go gateway/controller, one Python worker, one unary
@@ -75,9 +99,16 @@ making important control decisions recoverable.
 6. **Rolling deployments:** version-aware placement, drain/readiness behavior,
    rollback, then an optional Kubernetes deployment.
 
-See [the detailed roadmap](docs/roadmap.md),
-[the architecture notes](docs/architecture.md), and
-[ADR 0001](docs/adr/0001-control-plane-state.md).
+## Documentation map
+
+| Start here | What it answers |
+| --- | --- |
+| [Hiring-manager project tour](docs/project-tour.md) | What is technically interesting, what exists today, and how the work will be proved |
+| [Diagram gallery](docs/diagrams.md) | How requests, control state, failure recovery, and rolling deployments fit together |
+| [Architecture](docs/architecture.md) | Where responsibilities live and what failure semantics the system targets |
+| [ADR 0001](docs/adr/0001-control-plane-state.md) | Why durable facts use Raft while live load stays in memory |
+| [Roadmap](docs/roadmap.md) | Milestones, demonstrations, and exit criteria |
+| [Protobuf contract](api/inference/v1/inference.proto) | The initial controller-to-worker protocol |
 
 ## Repository layout
 

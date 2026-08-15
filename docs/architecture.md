@@ -21,6 +21,28 @@ without GPU availability becoming a prerequisite.
    limits, runs inference, and returns a response.
 6. Each service records latency and failure metrics using the same request ID.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant Gateway as Go gateway
+    participant Controller as Go controller
+    participant Worker as Python worker
+    participant Metrics as Prometheus
+
+    Client->>Gateway: Generate(prompt, deadline)
+    Gateway->>Controller: Route(request ID, model, deadline)
+    Controller->>Controller: Filter ready workers and rank by load
+    Controller->>Worker: Generate(request ID, attempt, prompt)
+    Worker->>Worker: Queue and form compatible batch
+    Worker-->>Controller: Generated text and token counts
+    Controller-->>Gateway: Response and selected worker
+    Gateway-->>Client: Generate response
+    Gateway--)Metrics: Request latency and status
+    Controller--)Metrics: Routing and retry metrics
+    Worker--)Metrics: Queue, batch, and execution metrics
+```
+
 ## Control-plane state
 
 ### Durable and strongly consistent
@@ -55,6 +77,19 @@ This split is necessary because the existing KV system is one Raft group: its
 leader serializes writes. Writing every heartbeat would consume consensus
 capacity without adding a useful durability guarantee.
 
+```mermaid
+flowchart LR
+    E["Worker and deployment events"] --> D{"Must this survive restart or be globally ordered?"}
+    D -->|"Yes"| R["Raft KV"]
+    D -->|"No; short-lived signal"| M["Controller memory"]
+    R --> R1["Registration and generation"]
+    R --> R2["Desired deployment state"]
+    R --> R3["Lifecycle transitions"]
+    M --> M1["Last heartbeat"]
+    M --> M2["Queue depth"]
+    M --> M3["Active requests"]
+```
+
 ## Dynamic batching
 
 Batching belongs in the Python worker because it owns the model runtime and can
@@ -77,6 +112,19 @@ wait, execution time, and end-to-end latency.
 - Draining workers remain alive for admitted work but receive no new requests.
 - A controller restart reconstructs durable desired state from Raft and waits for
   workers to re-establish ephemeral liveness.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Registering
+    Registering --> Ready: registration accepted
+    Ready --> Suspect: heartbeat becomes late
+    Suspect --> Ready: heartbeat arrives before lease expiry
+    Suspect --> Unavailable: lease expires
+    Ready --> Draining: rollout or shutdown requested
+    Draining --> Removed: admitted work completes
+    Unavailable --> Registering: newer generation registers
+    Removed --> [*]
+```
 
 ## Initial deployment topology
 
