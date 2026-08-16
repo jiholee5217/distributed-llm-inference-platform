@@ -1,13 +1,10 @@
 # Fault-Tolerant Distributed LLM Inference Platform
 
-Getting one model to return text is the easy part. I built this project to work
-on the harder systems questions: Where should the next request go? How long
-should a worker wait to form a batch? What happens when that worker disappears
-halfway through a request?
-
-The result is a distributed inference platform with a Go control plane, Python
-gRPC workers, dynamic batching, load-aware routing, failure recovery, and a
-five-node Raft key-value store for durable control-plane state.
+I built this project to learn how distributed inference systems coordinate
+requests across multiple workers and recover when those workers fail. It is a
+fault-tolerant inference platform with a Go control plane, Python gRPC workers,
+dynamic batching, load-aware routing, and a five-node Raft key-value store for
+durable control-plane state.
 
 This project builds directly on my
 [Distributed Key-Value Store](https://github.com/jiholee5217/distributed-kv-store).
