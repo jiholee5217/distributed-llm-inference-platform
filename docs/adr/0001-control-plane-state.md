@@ -16,8 +16,11 @@ old view by the time the data is recovered.
 
 ## Decision
 
-Persist worker identity, generation, declared capabilities, desired deployments,
-routing configuration, and meaningful lifecycle transitions in the Raft KV store.
+Persist worker identity, generation, declared capabilities, and meaningful
+lifecycle transitions in the Raft KV store. The current milestone implements
+registration, draining, and unavailable records. Desired deployments and routing
+configuration will follow the same durable-state rule once their reconcilers are
+implemented.
 
 Keep latest heartbeat time, queue depth, active request count, and short-lived
 load samples in controller memory. After a controller restart, workers must
@@ -25,7 +28,9 @@ re-register or heartbeat before becoming eligible for routing.
 
 ## Consequences
 
-- The control plane can recover desired state and worker identity from Raft.
+- Durable records survive controller failure. The current controller relies on
+  worker re-registration to rebuild its in-memory registry; automated Raft replay
+  belongs to the future reconciliation milestone.
 - The routing view is deliberately unavailable until fresh liveness arrives.
 - Heartbeat volume does not directly consume Raft consensus throughput.
 - Worker lifecycle transitions need generation checks to reject stale workers.

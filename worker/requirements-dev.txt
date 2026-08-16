@@ -1,0 +1,5 @@
+-r requirements.txt
+
+grpcio-tools==1.83.0
+locust==2.46.3
+pytest==9.1.1

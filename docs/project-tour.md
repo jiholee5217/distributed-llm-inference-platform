@@ -27,41 +27,49 @@ The boundary between those two categories is the central design decision.
    request IDs, attempt numbers, worker generations, leases, readiness, and load.
 4. Use the [architecture notes](architecture.md) to review deadlines, batching,
    retries, and controller recovery.
-5. Check the [roadmap](roadmap.md) to see what is implemented and the testable
+5. Review the [recorded results](results/2026-08-15-fake-model.md) and
+   [failure semantics](failure-semantics.md) for demonstrated behavior and limits.
+6. Check the [roadmap](roadmap.md) to see what is implemented and the testable
    exit condition for every upcoming milestone.
 
 ## Engineering decisions worth discussing
 
 | Decision | Reason | Tradeoff |
 | --- | --- | --- |
-| Store deployment intent and worker generations in Raft | Controllers need one recoverable ordering | Every durable transition pays consensus latency |
+| Store worker generations and lifecycle transitions in Raft | Controllers need one recoverable ordering | Every durable transition pays consensus latency |
 | Keep heartbeats and load samples in memory | They are frequent and quickly stale | A restarted controller must wait for fresh data |
 | Put batching in Python workers | Workers know model/runtime compatibility | Global queue optimization is intentionally deferred |
 | Start with unary inference | Failure and retry semantics are easier to define | Token streaming requires a later resume/deduplication design |
 | Begin with a deterministic fake model | Makes scheduling and fault tests cheap and repeatable | It does not demonstrate real model performance |
 | Use request IDs plus attempt numbers | Correlates retries and metrics across services | Exactly-once inference is not implied |
 
-## Evidence plan
+## Evidence ledger
 
 Architecture is only the hypothesis. Each feature must produce evidence:
 
-| Claim | Required evidence before claiming it |
+| Claim | Current evidence |
 | --- | --- |
-| Workers recover from failure | Automated heartbeat-expiry, exclusion, re-registration, and in-flight request tests |
-| Routing is load-aware | Deterministic scheduler tests plus a skewed-load experiment |
-| Dynamic batching improves throughput | Reproducible batch-size/queue-delay experiments with p50, p95, and p99 latency |
-| Rolling deployments preserve availability | Fault-injected rollout and rollback demo with request-success metrics |
-| The system is observable | Dashboards connecting queue depth, batch size, latency, retries, and worker health |
-| The control plane survives restart | Test that reloads Raft state and requires fresh liveness before routing |
+| Workers recover from failure | Unit retry test plus live process-kill and packaged Docker failure experiments |
+| Routing is load-aware | Deterministic capacity-normalized scheduling tests and balanced three-worker load runs |
+| Dynamic batching improves throughput | Controlled batch-size-one versus batch-size-eight Locust comparison with p50/p95/p99 |
+| The system is observable | Prometheus scrape validation and a provisioned Grafana dashboard for routing and batching |
+| Lifecycle state is strongly consistent | Live registration and lease-expiry values read back through the five-node Raft API |
+| Rolling deployments preserve availability | Not demonstrated; remains Milestone 6 |
+| Controller replicas coordinate safely | Not implemented; the controller remains single-instance |
 
 ## Current status
 
-Phase 0 contains architecture boundaries, a control-plane state decision, a
-milestone plan, and an initial protobuf contract. Services, generated clients,
-Docker topology, tests, dashboards, and benchmarks have not been implemented yet.
+Milestones 1-5 are implemented around a deterministic fake model: Go routing,
+Raft-backed registration/lifecycle state, Python dynamic batching, leases,
+bounded retries, metrics, dashboards, Locust workloads, and worker fault
+injection. The controlled run measured 6.73x throughput from batching; the
+packaged worker-kill run completed 10,437 requests without a client-visible
+failure.
 
-That status is intentional: repository claims should advance only when the
-corresponding demonstration or automated test lands.
+Real model execution, streaming, immediate queued-request cancellation,
+controller high availability, rolling deployments, authenticated transport, and
+Kubernetes have not been implemented. Claims remain scoped to the recorded
+fake-model environment.
 
 ## Interview discussion prompts
 

@@ -1,0 +1,51 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Gateway request rate",
+      "targets": [{"expr": "sum(rate(llm_platform_gateway_requests_total[1m]))", "legendFormat": "requests/s"}],
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "Gateway p95 latency",
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(llm_platform_gateway_request_duration_seconds_bucket[1m])))", "legendFormat": "p95 seconds"}],
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "Controller retries",
+      "targets": [{"expr": "sum by (reason) (rate(llm_platform_controller_retries_total[1m]))", "legendFormat": "{{reason}}"}],
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "Average dynamic batch size",
+      "targets": [{"expr": "sum by (worker) (rate(llm_platform_worker_batch_size_sum[1m])) / sum by (worker) (rate(llm_platform_worker_batch_size_count[1m]))", "legendFormat": "{{worker}}"}],
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker queue depth",
+      "targets": [{"expr": "llm_platform_worker_queue_depth", "legendFormat": "{{worker}}"}],
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker active requests",
+      "targets": [{"expr": "llm_platform_worker_active_requests", "legendFormat": "{{worker}}"}],
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8}
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 41,
+  "tags": ["distributed-systems", "llm-inference"],
+  "templating": {"list": []},
+  "time": {"from": "now-15m", "to": "now"},
+  "timezone": "browser",
+  "title": "Distributed LLM Inference Platform",
+  "uid": "distributed-llm-platform",
+  "version": 1
+}

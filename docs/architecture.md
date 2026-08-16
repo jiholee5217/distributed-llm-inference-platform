@@ -2,10 +2,11 @@
 
 ## System boundary
 
-The first version is a control-plane and scheduling project, not a new model
-runtime. A Python worker may initially execute a deterministic fake model. That
-keeps tests fast and makes routing, batching, timeouts, and recovery observable
-without GPU availability becoming a prerequisite.
+The current milestone is a control-plane and scheduling project, not a new model
+runtime. Python workers execute a deterministic fake model with configurable
+batch execution time. That keeps tests fast and makes routing, batching,
+timeouts, and recovery observable without GPU availability becoming a
+prerequisite. A real model backend is the next runtime milestone.
 
 ## Request path
 
@@ -15,8 +16,9 @@ without GPU availability becoming a prerequisite.
    freshness.
 3. A load-aware policy ranks eligible workers using queue depth, active requests,
    and reported capacity.
-4. The controller calls the selected worker over gRPC and propagates the deadline
-   and cancellation signal.
+4. The controller reserves capacity locally, calls the selected worker over gRPC,
+   and propagates the deadline. Transport cancellation stops the controller's
+   wait; immediate removal of already queued worker work remains a roadmap item.
 5. The worker queues the request, forms a batch within configured size and delay
    limits, runs inference, and returns a response.
 6. Each service records latency and failure metrics using the same request ID.
@@ -47,24 +49,24 @@ sequenceDiagram
 
 ### Durable and strongly consistent
 
-The Raft KV store will hold state that must survive controller restarts or be
-observed in one agreed order:
+The Raft KV store holds state that must survive controller restarts or be
+observed in one agreed order. The implemented records are:
 
 - worker identity and generation
 - model/version capabilities declared at registration
-- desired deployment state and rollout generation
-- worker lifecycle transitions such as registered, draining, and removed
-- routing policy configuration
-- request metadata only where an idempotency design requires it
+- lifecycle transitions to draining or unavailable
 
-Keys will use explicit namespaces, for example:
+The current KV API accepts one path segment per key, so records use dot-separated
+namespaces:
 
 ```text
-/workers/{worker_id}/registration
-/deployments/{deployment_id}/desired
-/deployments/{deployment_id}/status
-/config/routing
+workers.{worker_id}.registration
+workers.{worker_id}.status
 ```
+
+Desired deployment state, rollout generations, routing configuration, and any
+idempotency records are deliberately deferred until their reconciliation
+semantics are implemented.
 
 ### Ephemeral and high-frequency
 
@@ -83,8 +85,8 @@ flowchart LR
     D -->|"Yes"| R["Raft KV"]
     D -->|"No; short-lived signal"| M["Controller memory"]
     R --> R1["Registration and generation"]
-    R --> R2["Desired deployment state"]
-    R --> R3["Lifecycle transitions"]
+    R --> R2["Capabilities and generation"]
+    R --> R3["Draining and unavailable transitions"]
     M --> M1["Last heartbeat"]
     M --> M2["Queue depth"]
     M --> M3["Active requests"]
@@ -93,46 +95,61 @@ flowchart LR
 ## Dynamic batching
 
 Batching belongs in the Python worker because it owns the model runtime and can
-decide which requests are compatible. The initial policy will expose two knobs:
+decide which requests are compatible. The implemented policy exposes two knobs:
 
 - `max_batch_size`: upper bound on requests in one execution
 - `max_queue_delay_ms`: upper bound on how long the oldest request waits for a batch
 
-Metrics must show the latency/throughput tradeoff: observed batch size, queue
-wait, execution time, and end-to-end latency.
+The worker flushes when the batch reaches its size limit or the oldest queued
+request reaches its delay limit. Metrics expose the latency/throughput tradeoff:
+observed batch size, queue wait, execution time, queue depth, and end-to-end
+latency.
+
+## Load-aware scheduling
+
+Eligible workers are ranked by a capacity-normalized load score:
+
+```text
+(active_requests + queue_depth + controller_reservations) / max_concurrency
+```
+
+Controller-side reservations are included before the gRPC call starts so a
+burst of concurrent requests does not all observe the same stale heartbeat and
+stampede one worker. Worker ID provides a deterministic tie-breaker. Retries
+exclude workers already attempted for the request.
 
 ## Failure semantics
 
 - A worker becomes ineligible after its heartbeat lease expires.
-- In-flight unary requests may be retried only when the controller can establish
-  that no response was delivered and the retry budget/deadline permits it.
+- In-flight unary requests receive bounded retries for retryable transport and
+  capacity failures while the deadline permits. Because an unavailable response
+  can have an unknown execution outcome, retries can duplicate computation; the
+  API does not claim exactly-once inference.
 - Streaming retries require a separate resume or deduplication protocol and are
   intentionally postponed.
 - Each retry uses the same request ID and emits an attempt number.
 - Draining workers remain alive for admitted work but receive no new requests.
-- A controller restart reconstructs durable desired state from Raft and waits for
-  workers to re-establish ephemeral liveness.
+- After a controller restart, workers re-register and re-establish the ephemeral
+  liveness view. Durable Raft records remain available for audit; automatically
+  replaying them into controller memory is a later reconciliation milestone.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Registering
     Registering --> Ready: registration accepted
-    Ready --> Suspect: heartbeat becomes late
-    Suspect --> Ready: heartbeat arrives before lease expiry
-    Suspect --> Unavailable: lease expires
+    Ready --> Unavailable: heartbeat lease expires
     Ready --> Draining: rollout or shutdown requested
-    Draining --> Removed: admitted work completes
     Unavailable --> Registering: newer generation registers
-    Removed --> [*]
+    Draining --> Registering: newer generation registers
 ```
 
 ## Initial deployment topology
 
-Docker Compose will run:
+Docker Compose runs:
 
 - five existing Raft KV nodes
 - one Go gateway/controller process initially
-- two or more Python workers
+- three Python workers
 - Prometheus
 - Grafana
 

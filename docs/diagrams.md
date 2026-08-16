@@ -1,7 +1,9 @@
 # Diagram gallery
 
-These diagrams describe the target design. They are not evidence that every
-component is implemented; the [roadmap](roadmap.md) tracks that separately.
+Diagrams 1-4 describe the implemented fake-model runtime. Diagram 5 is explicitly
+the planned rolling-deployment extension. The [roadmap](roadmap.md) and
+[evidence ledger](project-tour.md#evidence-ledger) separate demonstrated behavior
+from future design.
 
 ## 1. System context
 
@@ -13,7 +15,7 @@ The existing five-node Raft cluster stores durable control-plane state.
 flowchart LR
     C["Client"] -->|"HTTP or gRPC"| G["Go API gateway"]
     G -->|"request ID and deadline"| S["Go scheduler/controller"]
-    S <-->|"durable desired state"| K["Five-node Raft KV"]
+    S <-->|"registration and lifecycle writes"| K["Five-node Raft KV"]
 
     subgraph P["Inference data plane"]
         W1["Python worker A"]
@@ -49,16 +51,16 @@ flowchart TB
     Q -->|"No"| E["Ephemeral controller state"]
 
     R --> R1["Worker ID and generation"]
-    R --> R2["Model deployment intent"]
-    R --> R3["Routing configuration"]
-    R --> R4["Drain and removal transitions"]
+    R --> R2["Declared model capabilities"]
+    R --> R3["Drain and unavailable transitions"]
+    R -.-> RP["Planned: deployment intent and routing config"]
 
     E --> E1["Last heartbeat time"]
     E --> E2["Queue depth"]
     E --> E3["Active request count"]
     E --> E4["Recent latency samples"]
 
-    R --> C["Controller reconciliation"]
+    R --> C["Registration and lifecycle admission"]
     E --> S["Load-aware scheduling"]
     C --> S
 ```
@@ -109,7 +111,7 @@ flowchart TD
     T --> X["Choose another ready worker"]
 ```
 
-## 5. Rolling model deployment
+## 5. Planned rolling model deployment
 
 The controller reconciles durable desired state rather than mutating every worker
 at once. A new version receives traffic only after readiness; old workers drain
