@@ -7,9 +7,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
-
-# Generated protobuf code
-gen/
+.tools/
 
 # Runtime state and models
 data/

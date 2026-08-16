@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 2s
+  evaluation_interval: 2s
+
+scrape_configs:
+  - job_name: controller
+    static_configs:
+      - targets: ["controller:8090"]
+
+  - job_name: workers
+    static_configs:
+      - targets: ["worker-1:9100", "worker-2:9100", "worker-3:9100"]

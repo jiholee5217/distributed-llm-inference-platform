@@ -1,0 +1,123 @@
+name: distributed-llm-inference-platform
+
+x-kv-node: &kv-node
+  build:
+    context: "${KV_STORE_CONTEXT:-https://github.com/jiholee5217/distributed-kv-store.git#8ad3ef6fdfe28cbc78d8ec7ebd44394adf68fba6}"
+  restart: unless-stopped
+
+x-worker: &worker
+  build:
+    context: .
+    dockerfile: deploy/worker.Dockerfile
+  restart: unless-stopped
+  depends_on: [controller]
+  environment: &worker-environment
+    CONTROLLER_ENDPOINT: controller:8091
+    LISTEN_ADDRESS: "[::]:50051"
+    MODEL_NAME: fake-llm
+    MODEL_VERSION: v1
+    MAX_CONCURRENCY: 32
+    MAX_BATCH_SIZE: 8
+    MAX_QUEUE_DELAY_MS: 5
+    FAKE_LATENCY_MS: 20
+    METRICS_PORT: 9100
+
+services:
+  kv-1:
+    <<: *kv-node
+    command: ["-id=kv-1", "-listen=:8080", "-advertise=http://kv-1:8080", "-members=kv-2=http://kv-2:8080,kv-3=http://kv-3:8080,kv-4=http://kv-4:8080,kv-5=http://kv-5:8080", "-data-dir=/data"]
+    ports: ["8081:8080"]
+    volumes: [kv-1-data:/data]
+
+  kv-2:
+    <<: *kv-node
+    command: ["-id=kv-2", "-listen=:8080", "-advertise=http://kv-2:8080", "-members=kv-1=http://kv-1:8080,kv-3=http://kv-3:8080,kv-4=http://kv-4:8080,kv-5=http://kv-5:8080", "-data-dir=/data"]
+    ports: ["8082:8080"]
+    volumes: [kv-2-data:/data]
+
+  kv-3:
+    <<: *kv-node
+    command: ["-id=kv-3", "-listen=:8080", "-advertise=http://kv-3:8080", "-members=kv-1=http://kv-1:8080,kv-2=http://kv-2:8080,kv-4=http://kv-4:8080,kv-5=http://kv-5:8080", "-data-dir=/data"]
+    ports: ["8083:8080"]
+    volumes: [kv-3-data:/data]
+
+  kv-4:
+    <<: *kv-node
+    command: ["-id=kv-4", "-listen=:8080", "-advertise=http://kv-4:8080", "-members=kv-1=http://kv-1:8080,kv-2=http://kv-2:8080,kv-3=http://kv-3:8080,kv-5=http://kv-5:8080", "-data-dir=/data"]
+    ports: ["8084:8080"]
+    volumes: [kv-4-data:/data]
+
+  kv-5:
+    <<: *kv-node
+    command: ["-id=kv-5", "-listen=:8080", "-advertise=http://kv-5:8080", "-members=kv-1=http://kv-1:8080,kv-2=http://kv-2:8080,kv-3=http://kv-3:8080,kv-4=http://kv-4:8080", "-data-dir=/data"]
+    ports: ["8085:8080"]
+    volumes: [kv-5-data:/data]
+
+  controller:
+    build:
+      context: .
+      dockerfile: deploy/controller.Dockerfile
+    restart: unless-stopped
+    depends_on: [kv-1, kv-2, kv-3, kv-4, kv-5]
+    command: ["-http-listen=:8090", "-grpc-listen=:8091", "-durable-store=raft", "-kv-endpoints=http://kv-1:8080,http://kv-2:8080,http://kv-3:8080,http://kv-4:8080,http://kv-5:8080", "-heartbeat-interval=500ms", "-lease-timeout=3s", "-failure-cooldown=1s", "-attempt-timeout=2s", "-max-attempts=3"]
+    ports: ["8090:8090", "8091:8091"]
+
+  worker-1:
+    <<: *worker
+    environment:
+      <<: *worker-environment
+      WORKER_ID: worker-1
+      ADVERTISE_ENDPOINT: worker-1:50051
+    ports: ["9101:9100"]
+
+  worker-2:
+    <<: *worker
+    environment:
+      <<: *worker-environment
+      WORKER_ID: worker-2
+      ADVERTISE_ENDPOINT: worker-2:50051
+    ports: ["9102:9100"]
+
+  worker-3:
+    <<: *worker
+    environment:
+      <<: *worker-environment
+      WORKER_ID: worker-3
+      ADVERTISE_ENDPOINT: worker-3:50051
+    ports: ["9103:9100"]
+
+  prometheus:
+    image: prom/prometheus:v3.8.1
+    restart: unless-stopped
+    depends_on: [controller, worker-1, worker-2, worker-3]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    volumes: ["./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:12.3.3
+    restart: unless-stopped
+    depends_on: [prometheus]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - "./deploy/grafana/provisioning:/etc/grafana/provisioning:ro"
+      - "./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro"
+    ports: ["3000:3000"]
+
+  locust:
+    profiles: [load]
+    build:
+      context: .
+      dockerfile: deploy/loadtest.Dockerfile
+    depends_on: [controller, worker-1, worker-2, worker-3]
+    command: ["--headless", "--users", "32", "--spawn-rate", "32", "--run-time", "15s", "--host", "http://controller:8090"]
+
+volumes:
+  kv-1-data:
+  kv-2-data:
+  kv-3-data:
+  kv-4-data:
+  kv-5-data:
