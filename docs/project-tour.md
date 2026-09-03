@@ -39,6 +39,7 @@ The boundary between those two categories is the central design decision.
 | Store worker generations and lifecycle transitions in Raft | Controllers need one recoverable ordering | Every durable transition pays consensus latency |
 | Keep heartbeats and load samples in memory | They are frequent and quickly stale | A restarted controller must wait for fresh data |
 | Put batching in Python workers | Workers know model/runtime compatibility | Global queue optimization is intentionally deferred |
+| Bound each worker queue by request count | Saturation fails fast instead of growing memory use and queue latency | Real models still need token- and GPU-memory-aware limits |
 | Start with unary inference | Failure and retry semantics are easier to define | Token streaming requires a later resume/deduplication design |
 | Begin with a deterministic fake model | Makes scheduling and fault tests cheap and repeatable | It does not demonstrate real model performance |
 | Use request IDs plus attempt numbers | Correlates retries and metrics across services | Exactly-once inference is not implied |
@@ -52,6 +53,7 @@ Architecture is only the hypothesis. Each feature must produce evidence:
 | Workers recover from failure | Unit retry test plus live process-kill and packaged Docker failure experiments |
 | Routing is load-aware | Deterministic capacity-normalized scheduling tests and balanced three-worker load runs |
 | Dynamic batching improves throughput | Controlled batch-size-one versus batch-size-eight Locust comparison with p50/p95/p99 |
+| Overload is bounded and retryable | Python queue-saturation and gRPC status tests plus a Go `ResourceExhausted` retry test |
 | The system is observable | Prometheus scrape validation and a provisioned Grafana dashboard for routing and batching |
 | Lifecycle state is strongly consistent | Live registration and lease-expiry values read back through the five-node Raft API |
 | Rolling deployments preserve availability | Not demonstrated; remains Milestone 6 |
@@ -60,11 +62,11 @@ Architecture is only the hypothesis. Each feature must produce evidence:
 ## Current status
 
 Milestones 1-5 are implemented around a deterministic fake model: Go routing,
-Raft-backed registration/lifecycle state, Python dynamic batching, leases,
-bounded retries, metrics, dashboards, Locust workloads, and worker fault
-injection. The controlled run measured 6.73x throughput from batching; the
-packaged worker-kill run completed 10,437 requests without a client-visible
-failure.
+Raft-backed registration/lifecycle state, Python dynamic batching, bounded
+worker admission, leases, retries, metrics, dashboards, Locust workloads, and
+worker fault injection. The controlled run measured 6.73x throughput from
+batching; the packaged worker-kill run completed 10,437 requests without a
+client-visible failure.
 
 Real model execution, streaming, immediate queued-request cancellation,
 controller high availability, rolling deployments, authenticated transport, and

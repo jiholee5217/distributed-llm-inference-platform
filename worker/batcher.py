@@ -15,6 +15,10 @@ class BatcherClosedError(RuntimeError):
     pass
 
 
+class BatcherFullError(RuntimeError):
+    pass
+
+
 @dataclass
 class _WorkItem:
     request: inference_pb2.GenerateRequest
@@ -30,21 +34,25 @@ class DynamicBatcher:
         worker_id: str,
         model_version: str,
         max_batch_size: int,
+        max_queue_depth: int,
         max_queue_delay_ms: float,
         fake_latency_ms: float,
         metrics: WorkerMetrics,
     ) -> None:
         if max_batch_size < 1:
             raise ValueError("max_batch_size must be positive")
+        if max_queue_depth < 1:
+            raise ValueError("max_queue_depth must be positive")
         if max_queue_delay_ms < 0 or fake_latency_ms < 0:
             raise ValueError("delays must not be negative")
         self.worker_id = worker_id
         self.model_version = model_version
         self.max_batch_size = max_batch_size
+        self.max_queue_depth = max_queue_depth
         self.max_queue_delay = max_queue_delay_ms / 1000.0
         self.fake_latency = fake_latency_ms / 1000.0
         self.metrics = metrics
-        self._queue: queue.Queue[_WorkItem | None] = queue.Queue()
+        self._queue: queue.Queue[_WorkItem | None] = queue.Queue(maxsize=max_queue_depth)
         self._lock = threading.Lock()
         self._active_requests = 0
         self._completed_batches = 0
@@ -63,7 +71,15 @@ class DynamicBatcher:
             # Enqueue while holding the acceptance lock. This makes drain/close
             # linearizable with submit and prevents a shutdown sentinel from
             # overtaking a request that was already admitted.
-            self._queue.put(_WorkItem(request=request, future=future, enqueued_at=time.monotonic()))
+            try:
+                self._queue.put_nowait(
+                    _WorkItem(request=request, future=future, enqueued_at=time.monotonic())
+                )
+            except queue.Full as error:
+                self.metrics.admission_rejections.labels(self.worker_id, "queue_full").inc()
+                raise BatcherFullError(
+                    f"worker queue reached its {self.max_queue_depth}-request limit"
+                ) from error
         self.metrics.queue_depth.labels(self.worker_id).set(self._queue.qsize())
         try:
             return future.result(timeout=timeout)

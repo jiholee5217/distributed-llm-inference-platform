@@ -7,7 +7,7 @@ from concurrent.futures import TimeoutError
 import grpc
 from api.inference.v1 import inference_pb2, inference_pb2_grpc
 
-from worker.batcher import BatcherClosedError, DynamicBatcher
+from worker.batcher import BatcherClosedError, BatcherFullError, DynamicBatcher
 from worker.metrics import WorkerMetrics
 
 
@@ -62,6 +62,9 @@ class InferenceService(inference_pb2_grpc.InferenceWorkerServicer):
             except BatcherClosedError as error:
                 outcome = "draining"
                 context.abort(grpc.StatusCode.UNAVAILABLE, str(error))
+            except BatcherFullError as error:
+                outcome = "overloaded"
+                context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, str(error))
         finally:
             self.metrics.requests.labels(self.worker_id, outcome).inc()
             self.metrics.request_latency.labels(self.worker_id).observe(time.monotonic() - started)

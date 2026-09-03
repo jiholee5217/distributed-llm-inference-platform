@@ -26,10 +26,23 @@ def main() -> None:
     parser.add_argument("--controller", default=os.getenv("CONTROLLER_ENDPOINT", "127.0.0.1:8091"))
     parser.add_argument("--model", default=os.getenv("MODEL_NAME", "fake-llm"))
     parser.add_argument("--model-version", default=os.getenv("MODEL_VERSION", "v1"))
-    parser.add_argument("--max-concurrency", type=int, default=int(os.getenv("MAX_CONCURRENCY", "32")))
-    parser.add_argument("--max-batch-size", type=int, default=int(os.getenv("MAX_BATCH_SIZE", "8")))
-    parser.add_argument("--max-queue-delay-ms", type=float, default=float(os.getenv("MAX_QUEUE_DELAY_MS", "5")))
-    parser.add_argument("--fake-latency-ms", type=float, default=float(os.getenv("FAKE_LATENCY_MS", "20")))
+    parser.add_argument(
+        "--max-concurrency", type=int, default=int(os.getenv("MAX_CONCURRENCY", "32"))
+    )
+    parser.add_argument(
+        "--max-batch-size", type=int, default=int(os.getenv("MAX_BATCH_SIZE", "8"))
+    )
+    parser.add_argument(
+        "--max-queue-depth", type=int, default=int(os.getenv("MAX_QUEUE_DEPTH", "16"))
+    )
+    parser.add_argument(
+        "--max-queue-delay-ms",
+        type=float,
+        default=float(os.getenv("MAX_QUEUE_DELAY_MS", "5")),
+    )
+    parser.add_argument(
+        "--fake-latency-ms", type=float, default=float(os.getenv("FAKE_LATENCY_MS", "20"))
+    )
     parser.add_argument("--metrics-port", type=int, default=int(os.getenv("METRICS_PORT", "9100")))
     parser.add_argument("--fail-every-n", type=int, default=int(os.getenv("FAIL_EVERY_N", "0")))
     parser.add_argument("--generation", type=int, default=int(os.getenv("WORKER_GENERATION", str(time.time_ns()))))
@@ -41,6 +54,7 @@ def main() -> None:
         worker_id=args.worker_id,
         model_version=args.model_version,
         max_batch_size=args.max_batch_size,
+        max_queue_depth=args.max_queue_depth,
         max_queue_delay_ms=args.max_queue_delay_ms,
         fake_latency_ms=args.fake_latency_ms,
         metrics=metrics,
@@ -53,7 +67,10 @@ def main() -> None:
         metrics=metrics,
         fail_every_n=args.fail_every_n,
     )
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=args.max_concurrency))
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=args.max_concurrency),
+        maximum_concurrent_rpcs=args.max_concurrency,
+    )
     inference_pb2_grpc.add_InferenceWorkerServicer_to_server(service, server)
     if server.add_insecure_port(args.listen) == 0:
         raise RuntimeError(f"could not bind inference server to {args.listen}")
@@ -72,10 +89,11 @@ def main() -> None:
     )
     registry.start()
     logging.info(
-        "worker %s listening on %s with batch_size=%s queue_delay_ms=%s",
+        "worker %s listening on %s with batch_size=%s queue_depth=%s queue_delay_ms=%s",
         args.worker_id,
         args.listen,
         args.max_batch_size,
+        args.max_queue_depth,
         args.max_queue_delay_ms,
     )
 

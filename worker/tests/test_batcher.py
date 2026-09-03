@@ -1,11 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from threading import Barrier, Event
 from time import monotonic, sleep
 
 import pytest
 from api.inference.v1 import inference_pb2
 
-from worker.batcher import BatcherClosedError, DynamicBatcher
+from worker.batcher import BatcherClosedError, BatcherFullError, DynamicBatcher
 from worker.metrics import WorkerMetrics
 
 
@@ -14,6 +14,7 @@ def make_batcher(**overrides) -> DynamicBatcher:
         "worker_id": "worker-test",
         "model_version": "v1",
         "max_batch_size": 8,
+        "max_queue_depth": 64,
         "max_queue_delay_ms": 20,
         "fake_latency_ms": 2,
         "metrics": WorkerMetrics(),
@@ -68,6 +69,47 @@ def test_drain_rejects_new_work() -> None:
     with pytest.raises(BatcherClosedError):
         batcher.submit(request(1), timeout=1)
     batcher.close()
+
+
+def test_full_queue_rejects_work_without_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
+    execution_started = Event()
+    release_execution = Event()
+
+    def block_execution(_delay: float) -> None:
+        execution_started.set()
+        release_execution.wait(timeout=1)
+
+    monkeypatch.setattr("worker.batcher.time.sleep", block_execution)
+    batcher = make_batcher(
+        max_batch_size=1,
+        max_queue_depth=1,
+        max_queue_delay_ms=0,
+        fake_latency_ms=1,
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        active = pool.submit(batcher.submit, request(1), 1)
+        assert execution_started.wait(timeout=1)
+
+        queued = pool.submit(batcher.submit, request(2), 1)
+        deadline = monotonic() + 1
+        while batcher.load()[1] == 0 and monotonic() < deadline:
+            sleep(0.001)
+        assert batcher.load()[1] == 1
+
+        with pytest.raises(BatcherFullError):
+            batcher.submit(request(3), timeout=1)
+        assert not active.done()
+        assert not queued.done()
+
+        release_execution.set()
+        active.result()
+        queued.result()
+    batcher.close()
+
+
+def test_queue_depth_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="max_queue_depth"):
+        make_batcher(max_queue_depth=0)
 
 
 def test_backlog_is_drained_without_extra_queue_delay() -> None:

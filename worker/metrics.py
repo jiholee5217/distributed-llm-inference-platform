@@ -10,6 +10,12 @@ class WorkerMetrics:
             ["worker", "outcome"],
             registry=self.registry,
         )
+        self.admission_rejections = Counter(
+            "llm_platform_worker_admission_rejections_total",
+            "Requests rejected before admission to the worker queue.",
+            ["worker", "reason"],
+            registry=self.registry,
+        )
         self.request_latency = Histogram(
             "llm_platform_worker_request_duration_seconds",
             "Worker-side request latency including queue wait.",

@@ -11,17 +11,40 @@ import (
 )
 
 type recordingInvoker struct {
-	workers  []string
-	attempts []uint32
+	workers     []string
+	attempts    []uint32
+	failureCode codes.Code
 }
 
 func (i *recordingInvoker) Generate(_ context.Context, worker WorkerSnapshot, request *inferencev1.GenerateRequest) (*inferencev1.GenerateResponse, error) {
 	i.workers = append(i.workers, worker.ID)
 	i.attempts = append(i.attempts, request.GetAttempt())
 	if worker.ID == "worker-a" {
-		return nil, status.Error(codes.Unavailable, "injected failure")
+		failureCode := i.failureCode
+		if failureCode == codes.OK {
+			failureCode = codes.Unavailable
+		}
+		return nil, status.Error(failureCode, "injected failure")
 	}
 	return &inferencev1.GenerateResponse{RequestId: request.GetRequestId(), WorkerId: worker.ID, Text: "FAKE: OK"}, nil
+}
+
+func TestRouterRetriesWorkerOverload(t *testing.T) {
+	registry := NewRegistry(3*time.Second, time.Second)
+	registerReady(t, registry, Registration{ID: "worker-a", Generation: 1, Endpoint: "a:50051", Models: []Model{{Name: "fake-llm", Version: "v1"}}, MaxConcurrency: 8})
+	registerReady(t, registry, Registration{ID: "worker-b", Generation: 1, Endpoint: "b:50051", Models: []Model{{Name: "fake-llm", Version: "v1"}}, MaxConcurrency: 8})
+	invoker := &recordingInvoker{failureCode: codes.ResourceExhausted}
+	router := NewRouter(registry, invoker, nil, 3, time.Second)
+
+	result, err := router.Generate(context.Background(), &inferencev1.GenerateRequest{
+		RequestId: "request-overload", Model: "fake-llm", ModelVersion: "v1", Prompt: "hello",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Attempts != 2 || result.Response.GetWorkerId() != "worker-b" {
+		t.Fatalf("expected overload retry on worker-b, got %+v", result)
+	}
 }
 
 func TestRouterRetriesDistinctWorker(t *testing.T) {

@@ -16,7 +16,7 @@ part of a larger system.
 - Workers register, heartbeat, advertise capacity, drain, and eventually expire.
 - The scheduler routes by normalized load and reserves capacity before dispatch.
 - Retries are bounded and sent to a different worker when possible.
-- Each Python worker forms batches using both a maximum size and queue deadline.
+- Each Python worker has a bounded queue and forms batches by size or deadline.
 - Durable lifecycle changes go through Raft; fast-changing load stays in memory.
 - Prometheus, Grafana, Locust, and failure scripts make behavior measurable.
 
@@ -53,14 +53,14 @@ flowchart LR
 ### What happens to one request
 
 1. The gateway validates the request, assigns an ID, and applies a deadline.
-2. The scheduler filters out expired, draining, incompatible, or full workers.
+2. The scheduler filters out expired, draining, or incompatible workers.
 3. It compares `(active + queued + reserved) / max_concurrency` and reserves a
    slot on the least-loaded candidate.
 4. The controller calls that worker over gRPC.
-5. The worker queues compatible requests until the batch is full or its short
-   queue deadline expires.
-6. If dispatch fails, the controller releases the reservation and can retry on
-   a different worker within the original deadline.
+5. The worker admits the request only if its bounded queue has room, then forms
+   a batch when the size or queue-delay limit is reached.
+6. If the queue is full or dispatch fails, the controller releases its
+   reservation and can retry a different worker within the original deadline.
 
 Generation numbers fence stale worker processes. A restarted worker cannot keep
 updating the lease created by its previous process, and expired workers are
@@ -137,8 +137,9 @@ and verifies that the remaining workers keep serving requests. See the
 
 The Go tests cover worker generations, lease expiration, capacity reservations,
 load-aware routing, retry selection, deadlines, metrics, and the Raft client.
-The Python tests cover queue limits, timer-triggered batches, maximum batch size,
-compatibility grouping, registration, heartbeats, and graceful draining.
+The Python tests cover bounded admission, retryable overload responses,
+timer-triggered batches, maximum batch size, registration, heartbeats, and
+graceful draining.
 
 The full integration path runs:
 
@@ -177,7 +178,7 @@ Useful next reads:
 ## Tradeoffs and next steps
 
 - The fake model is useful for controlled systems tests, but a real model runtime
-  still needs tokenization, memory-aware admission control, and GPU metrics.
+  still needs token-aware and memory-aware admission control plus GPU metrics.
 - The controller is currently a single process. Raft keeps its durable data
   consistent, but controller high availability is not implemented yet.
 - A lost gRPC response can cause duplicate compute on retry; execution is not

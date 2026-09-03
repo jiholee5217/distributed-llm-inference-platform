@@ -39,6 +39,7 @@ failure exclusion, and re-registration.
 
 - [x] Queue compatible requests per model/version
 - [x] Implement maximum batch size and queue delay
+- [x] Bound queue depth and return retryable overload responses
 - [ ] Propagate cancellation while queued
 - [x] Measure batch size, queue wait, execution latency, and throughput
 

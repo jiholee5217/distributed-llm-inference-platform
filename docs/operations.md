@@ -24,6 +24,11 @@ three are ready:
 curl -s http://127.0.0.1:8090/v1/workers
 ```
 
+Each worker admits at most `MAX_QUEUE_DEPTH` waiting requests (16 in the Docker
+topology), and gRPC limits total concurrent RPCs to `MAX_CONCURRENCY` (32).
+Requests beyond either bound receive a retryable `ResourceExhausted` response
+instead of allowing memory use and queue latency to grow indefinitely.
+
 ## Send inference
 
 ```bash
@@ -52,6 +57,10 @@ GPU-performance benchmark.
 | Controller metrics | <http://127.0.0.1:8090/metrics> | Requests, latency, routing, retries, and lifecycle events |
 | Prometheus | <http://127.0.0.1:9090> | Metric queries and scrape status |
 | Grafana | <http://127.0.0.1:3000> | Provisioned distributed-inference dashboard |
+
+The dashboard includes per-worker queue depth and admission-rejection rate. A
+nonzero rejection rate means the controller had to retry work that a saturated
+worker declined before execution.
 
 ## Run load and failure experiments
 

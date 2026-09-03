@@ -23,7 +23,7 @@ but a request ID alone cannot prove that a failed worker did not execute.
 | Failure point | Controller behavior | Execution guarantee |
 | --- | --- | --- |
 | No eligible worker before dispatch | Return HTTP 503 | Request did not reach a worker |
-| Worker rejects before admission | Retry a different worker when budget permits | Normally one execution, but transport errors can obscure admission |
+| Worker queue is full before admission | Return `ResourceExhausted`; retry a different worker when budget permits | Rejected attempt did not execute |
 | Connection fails during execution | Retry only for configured gRPC status, deadline, and attempt budget | Original attempt may have executed; outcome can be unknown |
 | End-to-end deadline expires | Return HTTP 504 | Queued work is cancelled when observed; executing work may finish |
 | All distinct workers fail | Return HTTP 502/503 with request ID and attempt count | One or more attempts may have executed |
@@ -32,6 +32,10 @@ Retryable gRPC statuses are `Unavailable`, `ResourceExhausted`, and
 `DeadlineExceeded`. Each attempt selects a distinct ready worker. The default
 maximum is three attempts, and every attempt is bounded by both a per-worker
 timeout and the original client deadline.
+
+The worker's request-count limit prevents its dynamic-batching queue from
+growing without bound. It does not estimate token count or GPU memory, so those
+resource-aware admission checks remain necessary for a real model runtime.
 
 ## Why this is not exactly once
 

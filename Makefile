@@ -21,4 +21,6 @@ verify: test
 	GOCACHE=$(GOCACHE) go vet ./...
 	GOCACHE=$(GOCACHE) go build -o /tmp/llm-platform-controller ./cmd/controller
 	test -z "$$(gofmt -l cmd internal)"
+	$(PYTHON) -m json.tool deploy/grafana/dashboards/platform.json >/dev/null
+	docker compose config --quiet
 	git diff --check

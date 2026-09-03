@@ -19,8 +19,9 @@ prerequisite. A real model backend is the next runtime milestone.
 4. The controller reserves capacity locally, calls the selected worker over gRPC,
    and propagates the deadline. Transport cancellation stops the controller's
    wait; immediate removal of already queued worker work remains a roadmap item.
-5. The worker queues the request, forms a batch within configured size and delay
-   limits, runs inference, and returns a response.
+5. The worker rejects the request before admission if its queue is full.
+   Otherwise, it forms a batch within configured size and delay limits, runs
+   inference, and returns a response.
 6. Each service records latency and failure metrics using the same request ID.
 
 ```mermaid
@@ -95,15 +96,24 @@ flowchart LR
 ## Dynamic batching
 
 Batching belongs in the Python worker because it owns the model runtime and can
-decide which requests are compatible. The implemented policy exposes two knobs:
+decide which requests are compatible. The implemented policy exposes three knobs:
 
 - `max_batch_size`: upper bound on requests in one execution
+- `max_queue_depth`: upper bound on requests waiting for execution
 - `max_queue_delay_ms`: upper bound on how long the oldest request waits for a batch
 
 The worker flushes when the batch reaches its size limit or the oldest queued
-request reaches its delay limit. Metrics expose the latency/throughput tradeoff:
-observed batch size, queue wait, execution time, queue depth, and end-to-end
-latency.
+request reaches its delay limit. A full queue fails admission immediately with
+gRPC `ResourceExhausted`, which the controller can retry on a different worker.
+This bounds queued Python objects and waiting futures by request count; a real
+runtime still needs token- and GPU-memory-aware limits. Metrics expose observed
+batch size, queue wait, execution time, queue depth, admission rejections, and
+end-to-end latency.
+
+The gRPC server separately caps concurrent RPCs at `max_concurrency`, matching
+the capacity advertised to the controller. The queue limit is intentionally
+lower in the Docker topology so saturated handlers can reject excess work
+without waiting behind the model thread.
 
 ## Load-aware scheduling
 
@@ -121,6 +131,9 @@ exclude workers already attempted for the request.
 ## Failure semantics
 
 - A worker becomes ineligible after its heartbeat lease expires.
+- A full worker queue returns `ResourceExhausted` before execution begins; the
+  controller treats that status as retryable and excludes the saturated worker
+  from the next attempt.
 - In-flight unary requests receive bounded retries for retryable transport and
   capacity failures while the deadline permits. Because an unavailable response
   can have an unknown execution outcome, retries can duplicate computation; the

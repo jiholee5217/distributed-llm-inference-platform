@@ -83,9 +83,13 @@ sequenceDiagram
     Controller->>Controller: Filter by version, readiness, and lease
     Controller->>Controller: Rank by queue and active load
     Controller->>Worker: Generate(request ID, attempt 1)
-    Worker->>Worker: Enqueue request
-    Worker->>Worker: Form batch by size or queue deadline
-    Worker-->>Controller: Text and token counts
+    alt Queue has capacity
+        Worker->>Worker: Enqueue and form batch by size or deadline
+        Worker-->>Controller: Text and token counts
+    else Queue is full
+        Worker-->>Controller: ResourceExhausted before execution
+        Controller->>Controller: Exclude worker and spend retry budget
+    end
     Controller-->>Gateway: Worker response
     Gateway-->>Client: Generate response
 ```
@@ -95,6 +99,9 @@ sequenceDiagram
 There are two distinct failure paths. New requests stop routing to a worker when
 its lease expires. An in-flight request is retried only when its deadline and the
 documented retry semantics allow another attempt.
+
+The same retry path handles explicit overload: a worker whose local queue is
+full rejects before execution, and the next attempt targets a different worker.
 
 ```mermaid
 flowchart TD
